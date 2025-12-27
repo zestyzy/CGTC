@@ -10,8 +10,8 @@ train:
   device: "cuda:0"
   log_interval: 1
 
-loss:
-  channel_weights: [1.0, 0.5, 0.5, 0.5]
+loss: 
+  channel_weights: [1.0, 1.0, 1.0, 1.0]
   phys_alpha: 0.5
 
 guard:
@@ -22,6 +22,14 @@ guard:
   reverse_hierarchy: false
   no_rollback: false
   no_freeze_teacher: false
+  # Cosine-based trust-region control for PINN gradients
+  cos_control: true
+  cos_trust: 0.2
+  cos_surgery: 0.0
+  cos_freeze: -0.3
+  cos_scale_min: 0.2
+  cos_surgery_solver: "pcgrad"
+  # When cos_control is enabled, PINN cooling triggers follow cos stages.
 
 pinn:
   use: true

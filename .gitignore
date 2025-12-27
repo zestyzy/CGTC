@@ -23,7 +23,7 @@ test.sh
 fig.sh
 fig4_experiments.sh
 scripts/demo.sh
-Rotate/train_tpac_old.py
-Rotate/train_tpac_new.py
-Rotate/training/trainer_old.py
-Rotate/training/trainer_new.py
+CGTC/train_tpac_old.py
+CGTC/train_tpac_new.py
+CGTC/training/trainer_old.py
+CGTC/training/trainer_new.py

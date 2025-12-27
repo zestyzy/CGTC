@@ -1,42 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-test.py —— 评测 / 可视化（支持 YAML 配置，尽可能与 train_tpac 对齐）
-
-更新要点（本版本）：
-1) ✅ 新增全量/抽样物理评估开关
-   ap.add_argument("--phys_max_items", type=int, default=6,
-                  help="物理评估最多样本数；-1 表示全量 test")
-
-2) ✅ 可选：固定可追溯样本可视化
-   - --vis_indices 0,5,12
-   - 每个样本输出到独立文件夹：
-       results/temp_results/CASE/TAG/samples_vis/idx_XXXX/...
-   - 若不提供 --vis_indices，保持原来“随机单样本 + 随机 triplet”行为。
-
-3) ✅ 新增：保存参与可视化的原始点云数据
-   - 在可视化样本所在 out_dir 下写出：
-       vis_raw_idxXXXX.npz
-       vis_raw_idxXXXX.csv
-   - 内容包含 xyz / p,u,v,w 的 label、pred、error，用于后续统一色阶绘图。
-
-使用示例：
-# 单实验
-CUDA_VISIBLE_DEVICES=0 python test_tpac.py \
-  --device cuda:0 \
-  --root   /path/to/Rotate \
-  --case   ICA_norm \
-  --tag    1205_01_supervised_only \
-  --ckpt   results/temp_results/ICA_norm/1205_01_supervised_only/weight/final_reco.pth \
-  --cfg    runs/wo/ICA_norm/1205/configs/1205_01_supervised_only.yaml \
-  --pts    4096 \
-  --vis_indices 0,5,12 \
-  --phys_max_items -1
-
-# 搭配你的 test.sh 批量跑：
-bash test.sh --case ICA_norm --tag 1205 \
-  --device cuda:0 --pts 4096 \
-  --vis_indices 0,5,12 \
-  --phys_max_items -1
+test.py 
 """
 
 from __future__ import annotations

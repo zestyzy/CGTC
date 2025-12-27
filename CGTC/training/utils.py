@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# TPAC/training/utils.py
+# training/utils.py
 from __future__ import annotations
 from pathlib import Path
 import torch

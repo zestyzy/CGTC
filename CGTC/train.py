@@ -1,25 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-train.py —— 训练入口（支持 YAML 配置，和 test_tpac 对齐）
-
-功能要点
-- 读取 YAML（默认 Rotate/configs/default.yaml），并允许命令行覆盖 device / batch / workers / 采样点数等。
-- 自动构建数据集（train / test），若缺少 out.csv 或 data.pkl 自动生成。
-- 统一构建 backbone（从 cfg.models.backbone 读取；自动把 args 规范为 dict，避免 SimpleNamespace 导致的报错）。
-- 构建 teacher（可选，取决于 cfg.teacher.use）。
-- 使用 Trainer.run() 完整训练，输出：
-  * results/temp_results/{case}/{tag}/weight/ 下多种“最佳”权重和 final_reco.pth（符号链接或拷贝）
-  * 训练过程 metrics CSV 与 TXT 日志
-  * 训练曲线曲线图（loss、MAE、连续性 raw/weighted、combo、alpha、λ_mult 等）
-
 用法示例
 CUDA_VISIBLE_DEVICES=0 python train_tpac.py \
-  --cfg   Rotate/configs/default.yaml \
-  --root  /data/.../Rotate \
+  --cfg   CGTC/configs/default.yaml \
+  --root  /data/.../CGTC \
   --case  C1 \
   --tag   tpac_test \
   --device cuda:0 \
-  --pts 16384 --batch 2 --workers 4
+  --pts 4096 --batch 2 --workers 4
 
 训练结束后，推荐权重位于：
   /.../results/temp_results/{case}/{tag}/weight/final_reco.pth
@@ -38,10 +26,9 @@ from typing import Any
 
 from torch.utils.data import DataLoader
 
-# --- 工程内依赖 ---
-try:  # pragma: no cover - prefer absolute import when available
-    from Rotate.models.backbone import build_backbone
-except ModuleNotFoundError:  # pragma: no cover - fallback for script execution
+try:  
+    from CGTC.models.backbone import build_backbone
+except ModuleNotFoundError: 
     from models.backbone import build_backbone
 from training.trainer import Trainer
 from training.utils import ensure_dir, plot_training_curves

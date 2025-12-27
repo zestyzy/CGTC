@@ -27,3 +27,7 @@ CGTC/train_tpac_old.py
 CGTC/train_tpac_new.py
 CGTC/training/trainer_old.py
 CGTC/training/trainer_new.py
+collect_vis.sh
+CGTC/wo.py
+CGTC/draw_picture.py
+CGTC/docs

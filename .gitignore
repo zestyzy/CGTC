@@ -31,3 +31,8 @@ collect_vis.sh
 CGTC/wo.py
 CGTC/draw_picture.py
 CGTC/docs
+CGTC/configs/core_pcgrad_grad_guard_test.yaml
+CGTC/configs/core_pcgrad_test.yaml
+CGTC/configs/default_new.yaml
+CGTC/configs/default_old.yaml
+scripts/

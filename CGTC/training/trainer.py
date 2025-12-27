@@ -274,6 +274,45 @@ class Trainer:
         except Exception:
             return float("nan")
 
+    @staticmethod
+    def _cosine_scale(
+        cos_val: float,
+        low: float,
+        high: float,
+        min_scale: float,
+    ) -> float:
+        if not math.isfinite(cos_val):
+            return 1.0
+        if high <= low:
+            return float(min_scale)
+        t = (cos_val - low) / (high - low)
+        t = float(max(0.0, min(1.0, t)))
+        return float(min_scale + (1.0 - min_scale) * t)
+
+    def _cosine_control(self, cos_val: float) -> tuple[str, float, Optional[str]]:
+        if (not self.cos_control) or (not math.isfinite(cos_val)):
+            return "off", 1.0, None
+
+        if cos_val >= self.cos_trust:
+            return "trust", 1.0, None
+        if cos_val >= self.cos_surgery:
+            scale = self._cosine_scale(
+                cos_val,
+                self.cos_surgery,
+                self.cos_trust,
+                self.cos_scale_min,
+            )
+            return "scale", scale, None
+        if cos_val >= self.cos_freeze:
+            scale = self._cosine_scale(
+                cos_val,
+                self.cos_freeze,
+                self.cos_surgery,
+                self.cos_scale_min,
+            )
+            return "surgery", scale, self.cos_surgery_solver
+        return "freeze", 0.0, None
+
     def _apply_grad_ratio_guard(
         self,
         raw_loss: torch.Tensor,
@@ -478,6 +517,8 @@ class Trainer:
             "g_sup": float(phys_info.get("g_sup", float("nan"))),
             "g_phys": float(phys_info.get("g_phys", float("nan"))),
             "g_ratio": float(phys_info.get("g_ratio", float("nan"))),
+            "cos_stage": str(phys_info.get("cos_stage", "")),
+            "cos_scale": float(phys_info.get("cos_scale", float("nan"))),
         }
         self.step_records.append(record)
 
@@ -534,6 +575,8 @@ class Trainer:
             "pinn_cont_raw": float(pc_raw),
             "pinn_mom_raw": float(pm_raw),
             "consis_raw": float(consis_raw),
+            "cos_stage": "",
+            "cos_scale": float("nan"),
         }
         self.step_records.append(record)
 
@@ -735,6 +778,7 @@ class Trainer:
         self,
         objectives: list[torch.Tensor],
         params: list[torch.nn.Parameter],
+        solver_override: Optional[str] = None,
     ) -> None:
         # explicit FP32 multi-objective backward; AMP is disabled here
         valid_objs: list[torch.Tensor] = []
@@ -757,11 +801,12 @@ class Trainer:
             )
             grads_list.append([g if g is not None else None for g in grads])
 
-        if len(grads_list) == 1 or self.mo_solver == "sum":
+        solver = solver_override or self.mo_solver
+        if len(grads_list) == 1 or solver == "sum":
             merged = self._merge_mean_grads(grads_list)
-        elif self.mo_solver == "pcgrad":
+        elif solver == "pcgrad":
             merged = self._merge_pcgrad(grads_list)
-        elif self.mo_solver == "cagrad":
+        elif solver == "cagrad":
             merged = self._merge_cagrad(grads_list)
         else:
             merged = self._merge_mean_grads(grads_list)
@@ -883,6 +928,15 @@ class Trainer:
         self.reverse_hierarchy = bool(getattr(guard_cfg, "reverse_hierarchy", False))
         self.allow_rollback = not bool(getattr(guard_cfg, "no_rollback", False))
         self.allow_freeze_teacher = not bool(getattr(guard_cfg, "no_freeze_teacher", False))
+        self.cos_control = bool(getattr(guard_cfg, "cos_control", False))
+        self.cos_trust = float(getattr(guard_cfg, "cos_trust", 0.2))
+        self.cos_surgery = float(getattr(guard_cfg, "cos_surgery", 0.0))
+        self.cos_freeze = float(getattr(guard_cfg, "cos_freeze", -0.3))
+        self.cos_scale_min = float(getattr(guard_cfg, "cos_scale_min", 0.2))
+        self.cos_scale_min = max(0.0, min(1.0, self.cos_scale_min))
+        self.cos_surgery_solver = str(getattr(guard_cfg, "cos_surgery_solver", "pcgrad")).lower()
+        cos_bounds = sorted([self.cos_freeze, self.cos_surgery, self.cos_trust])
+        self.cos_freeze, self.cos_surgery, self.cos_trust = cos_bounds
         layers_cfg = getattr(guard_cfg, "layers", ["auto"])
         if isinstance(layers_cfg, str):
             layers_cfg = [layers_cfg]
@@ -1128,6 +1182,8 @@ class Trainer:
                 "g_sup": float("nan"),
                 "g_phys": float("nan"),
                 "g_ratio": float("nan"),
+                "cos_stage": "off",
+                "cos_scale": 1.0,
             }
             spatial_raw_term_for_grad: Optional[torch.Tensor] = None
             phys_raw_term_for_grad: Optional[torch.Tensor] = None
@@ -1296,7 +1352,7 @@ class Trainer:
 
                             if phys_guard is not None:
                                 phys_info.update(phys_guard)
-                                if phys_guard.get("triggered"):
+                                if phys_guard.get("triggered") and (not self.cos_control):
                                     cooling_flags.append(self._trigger_cooling("pinn", "overbound"))
                                 guard_scales.append(float(phys_guard.get("scale", 1.0)))
 
@@ -1329,7 +1385,7 @@ class Trainer:
 
                         if phys_guard is not None:
                             phys_info.update(phys_guard)
-                            if phys_guard.get("triggered"):
+                            if phys_guard.get("triggered") and (not self.cos_control):
                                 cooling_flags.append(self._trigger_cooling("pinn", "overbound"))
                             guard_scales.append(float(phys_guard.get("scale", 1.0)))
 
@@ -1356,6 +1412,41 @@ class Trainer:
                     elif spatial_pending:
                         spatial_guard_scales.append(1.0)
 
+            gradcos_spat = float("nan")
+            gradcos_phys = float("nan")
+            neg_cos = False
+            cos_stage = "off"
+            cos_scale = 1.0
+            cos_solver_override: Optional[str] = None
+            if self.grad_params and (self.global_step % self.gradcos_interval == 0):
+                gradcos_spat = self._compute_grad_cos(mse, spatial_raw_term_for_grad)
+                gradcos_phys = self._compute_grad_cos(mse, phys_raw_term_for_grad)
+                if math.isfinite(gradcos_spat) and gradcos_spat < 0:
+                    cooling_flags.append(self._trigger_cooling("spatial", "neg-cos"))
+                    neg_cos = True
+                if math.isfinite(gradcos_phys) and gradcos_phys < 0:
+                    if not self.cos_control:
+                        cooling_flags.append(self._trigger_cooling("pinn", "neg-cos"))
+                    neg_cos = True
+
+            if self.cos_control and math.isfinite(gradcos_phys) and phys_term_eff is not None:
+                cos_stage, cos_scale, cos_solver_override = self._cosine_control(gradcos_phys)
+                phys_info["cos_stage"] = cos_stage
+                phys_info["cos_scale"] = float(cos_scale)
+                if cos_stage == "freeze":
+                    total = total - phys_term_eff
+                    phys_term_eff = None
+                    cooling_flags.append(self._trigger_cooling("pinn", "cos-freeze"))
+                elif cos_stage in {"scale", "surgery"}:
+                    if cos_scale < 1.0:
+                        total = total - phys_term_eff
+                        phys_term_eff = phys_term_eff * float(cos_scale)
+                        total = total + phys_term_eff
+                    if cos_stage == "surgery":
+                        cooling_flags.append(self._trigger_cooling("pinn", "cos-surgery"))
+                    else:
+                        cooling_flags.append(self._trigger_cooling("pinn", "cos-scale"))
+
             # multi-objectives for solver: sup + spatial + physics
             mo_objectives: list[torch.Tensor] = []
             if sup_obj_for_mo is not None:
@@ -1364,19 +1455,6 @@ class Trainer:
                 mo_objectives.append(spatial_term_eff)
             if phys_term_eff is not None:
                 mo_objectives.append(phys_term_eff)
-
-            gradcos_spat = float("nan")
-            gradcos_phys = float("nan")
-            neg_cos = False
-            if self.grad_params and (self.global_step % self.gradcos_interval == 0):
-                gradcos_spat = self._compute_grad_cos(mse, spatial_raw_term_for_grad)
-                gradcos_phys = self._compute_grad_cos(mse, phys_raw_term_for_grad)
-                if math.isfinite(gradcos_spat) and gradcos_spat < 0:
-                    cooling_flags.append(self._trigger_cooling("spatial", "neg-cos"))
-                    neg_cos = True
-                if math.isfinite(gradcos_phys) and gradcos_phys < 0:
-                    cooling_flags.append(self._trigger_cooling("pinn", "neg-cos"))
-                    neg_cos = True
 
             if not torch.isfinite(total):
                 nonfinite += 1
@@ -1392,7 +1470,7 @@ class Trainer:
                 or bool(neg_cos)
             )
             use_mo = (
-                cooling_active
+                (cooling_active or cos_stage == "surgery")
                 and (self.mo_solver is not None)
                 and (self.mo_solver != "sum")
                 and (len(mo_objectives) >= 2)
@@ -1400,7 +1478,11 @@ class Trainer:
 
             if use_mo:
                 params = [p for p in self.model.parameters() if p.requires_grad]
-                self._backward_multi_objective(mo_objectives, params)
+                self._backward_multi_objective(
+                    mo_objectives,
+                    params,
+                    solver_override=cos_solver_override,
+                )
             else:
                 self.scaler.scale(total).backward()
                 if cfg.train.grad_clip is not None:

@@ -28,6 +28,7 @@ CGTC/train_tpac_new.py
 CGTC/training/trainer_old.py
 CGTC/training/trainer_new.py
 collect_vis.sh
+fig4.sh
 CGTC/wo.py
 CGTC/draw_picture.py
 CGTC/docs
@@ -36,4 +37,3 @@ CGTC/configs/core_pcgrad_test.yaml
 CGTC/configs/default_new.yaml
 CGTC/configs/default_old.yaml
 scripts/
-fig4.sh

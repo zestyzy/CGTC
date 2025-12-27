@@ -18,20 +18,21 @@ import torch.nn as nn
 from tqdm import tqdm
 
 
-from CGTC.models.pinn import SteadyIncompressiblePINN
-from CGTC.training.losses import (
+from models.pinn import SteadyIncompressiblePINN
+from training.losses import (
         make_scaler,
         make_point_weights,
         compute_weighted_losses,
         losses_per_channel,
     )
-from CGTC.training.schedules import (
+from training.schedules import (
         base_lambda_cont,
         current_alpha,
         teacher_consis_weight,
     )
-from CGTC.training.utils import ensure_dir, save_state, symlink_or_copy
-from CGTC.eval.metrics import compute_region_metrics
+from training.utils import ensure_dir, save_state, symlink_or_copy
+from training.metrics import compute_region_metrics
+
 
 # ----------------- small helpers -----------------
 def stack_preds(preds_dict: dict) -> torch.Tensor:

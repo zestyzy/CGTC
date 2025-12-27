@@ -26,10 +26,8 @@ from typing import Any
 
 from torch.utils.data import DataLoader
 
-try:  
-    from CGTC.models.backbone import build_backbone
-except ModuleNotFoundError: 
-    from models.backbone import build_backbone
+from models.backbone import build_backbone
+
 from training.trainer import Trainer
 from training.utils import ensure_dir, plot_training_curves
 from data.dataset import pointdata, norm_data, build_out_csv_from_dir

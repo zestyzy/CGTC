@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from typing import Optional, Dict
 from models.pointnet2pp import PointNet2Regressor as _PN2Reg
-from models.pointTransformer import PointTransformerRegressor as _PTReg,
+from models.pointTransformer import PointTransformerRegressor as _PTReg
 
 __all__ = ["PointNet2Adapter", "PointTransformerAdapter", "build_backbone"]
 

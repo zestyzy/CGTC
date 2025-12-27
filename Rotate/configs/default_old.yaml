@@ -1,0 +1,203 @@
+# =====================  CGTC (Core + Enhance, PointNet++ backbone) =====================
+
+train:
+  epochs: 200
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  eta_min: 1.0e-5
+  grad_clip: 1.0
+  device: "cuda:0"
+  log_interval: 1          # step 粒度的日志频率
+
+loss:
+  # [BACKBONE/TASK] 监督损失通道权重 [p, u, v, w]
+  channel_weights: [1.0, 0.5, 0.5, 0.5]
+  # 用于 combo = val_loss + phys_alpha * cont_w（仅保存/画图参考）
+  phys_alpha: 0.5
+
+# --------------------------------------------------------------------------------------------
+# CGTC-Core：守卫 + 事件触发冷却 + PINN 残差 + EMA teacher + 轻量空间一致性 + BOOST→HOLD
+# --------------------------------------------------------------------------------------------
+guard:                    # [CORE 控制器：梯度冲突观测 + 事件触发]
+  disable: false          # core_ablation / baseline 会在 wo.py 里把它改成 true
+  gradcos_interval: 10    # 每多少 step 统计一次梯度余弦
+  layers: ["auto"]        # "auto" = 首/倒数第二/最后一层；可视作固定常数
+  eps: 1.0e-8
+
+pinn:                     # [CORE：PINN 残差 + BOOST→HOLD 日程 + 比例守卫 + λ_cont 自适应]
+  use: true
+
+  # 邻域/采样（BOOST 阶段内 trainer 会临时提高）
+  k: 24
+  samples: 4096
+
+  rho: 1.0
+  nu_eff: 0.003
+
+  # 动量项（进入 HOLD 后才启用小权重；BOOST 阶段 trainer 会临时设为 0）
+  lambda_mom: 0.001
+
+  # 进入 PINN 的时间：warmup 后开始，再按 schedule 从 lmax → lmin（down 模式）
+  warmup: 100             # 监督优先的 warm: 只用 L_s + teacher
+  ramp: 40                # 从 BOOST 过渡到 HOLD 的区间长度
+  smooth_epochs: 12       # patience 触发后平滑拉升 λ_cont 的缓冲步数
+  lmax: 0.02              # BOOST 开始时连续性权重
+  lmin: 0.002             # HOLD 阶段的连续性最低权重
+  schedule: "cosine"
+  mode: "down"            # 从高到低
+
+  # ---- 比率守卫（Core 的关键可调量之一）----
+  max_loss_ratio: 0.12        # PINN loss 相对监督 MSE 的上限比例（core 主超参之一）
+  max_ratio_vs_spatial: 0.8   # PINN loss 相对空间一致性项的上限比例
+
+  # ---- 事件触发冷却（Core 的关键机制）----
+  guard_blend_reset: 0.65     # 触发后回退 blend 的均值阈值
+  guard_backoff: 0.4          # 触发后 λ_cont 回调的系数下限
+  guard_adapt_min: 0.35       # λ_cont 自适应需要的最低守卫均值
+  guard_blend_decay: 0.5      # 守卫触发时对 blend 的额外衰减比例
+  guard_cooldown: 3           # 守卫触发后保持 blend 不再提升的 epoch 数
+  guard_gamma: 0.7            # 冷却时对 PINN blend 的衰减系数
+  cooling_window: 4           # 冷却窗口长度（epoch）
+
+  # ---- λ_cont 自适应（Core 内的自适应逻辑）----
+  adapt: true
+  lcont_min_mult: 0.5
+  lcont_max_mult: 1.8
+  lcont_mult_init: 1.0
+  up_rate: 1.05
+  down_rate: 0.985
+  adapt_after: 121           # 紧接 warmup 之后
+  adapt_interval: 3
+
+  # raw div 阈值与一次性自动标定
+  div_target: 0.1            # 初始容忍（可按数据改 0.04~0.08）
+  div_tol: 0.20              # 20% 容忍带
+  auto_calib: true
+  calib_mult: 0.6            # 用早期观测 raw * 0.6 作为目标
+
+  # BOOST→HOLD：Core 的时间日程
+  boost_epochs: 30           # 进入 PINN 后，前 30 个 epoch 执行 BOOST
+
+teacher:                     # [CORE：EMA Teacher + 空间一致性]
+  use: true
+  ema_beta: 0.995
+  max_w: 0.20                # teacher 权重的软上界（通常固定）
+  decay_eps: 200             # teacher 权重衰减的缓冲区间
+
+  # warm 阶段教师策略
+  use_best_warm: true        # warmup 结束后冻结 teacher 为 warmup 最优
+  freeze_after_warm: true    # 之后不再更新 teacher（监督 anchor）
+
+  # 教师一致性项相对监督 MSE 的最大占比（Core 重要标量之一）
+  max_ratio: 0.35
+
+  spatial:                   # 轻量空间一致性（旋转扰动）
+    use: true
+    max_deg: 6.0
+    weight: 0.05
+    max_ratio: 0.20          # 空间一致性项相对监督 MSE 的最大占比（Core 重要标量）
+    # 冷却与恢复（与 PINN 冷却机制类似）
+    gamma: 0.75
+    cooling_window: 3
+    recover_step: 0.1
+
+p_grad:                       # [CORE：p 通道梯度控制（早期更稳）]
+  release_epoch: 130          # 建议 ≤ warmup + ramp 更稳
+  scale: 0.05
+
+# --------------------------------------------------------------------------------------------
+# CGTC-Enhance：在 Core 安全边界之上叠加的“复杂场景增强模块”
+#  - wall/interior mixed focus
+#  - 通道自适应权重（adapt）
+#  - 梯度手术（mo）
+#  - 鲁棒扰动协议（robust）在 robustness 实验中通过 wo.py 打开
+# --------------------------------------------------------------------------------------------
+
+robust:                       # [ENH/ROBUST：扰动协议，wo.py 中按需要覆盖]
+  subsample_ratio: 1.0        # 1.0 = 不稀疏；wo.py 会改成 0.5 / 0.25
+  coord_noise_sigma: 0.0
+  field_noise_sigma: 0.0
+  occlusion_ratio: 0.0
+  occlusion_min: 0.05
+  occlusion_max: 0.25
+  scale_factor: 1.0
+  apply_to_val: false         # wo.py 在 robustness 实验里改成 true
+  apply_to_test: false
+  ood_rotation:
+    enabled: false            # wo.py 会在 rot_45 实验里改为 true
+    max_deg: 45.0
+
+curriculum:                   # [ENH：只在 non-mixed 下用的 wall→interior 切换]
+  split: 0.8                  # 这里你目前 trainer 只在非 mixed 时用，可视作固定
+
+mixed:                        # [ENH：wall / interior mixed focus]
+  use: true                   # Core 实验里 wo.py 会强制改为 false
+  alpha_start: 1.0
+  alpha_end: 0.8
+  decay_start: 1
+  decay_epochs: 200
+  schedule: "cosine"
+  wall_sigma: 0.10
+
+adapt:                        # [ENH：通道加权自适应（基于 EMA 相对误差）]
+  enable: true                # Core 实验里 wo.py 会强制改为 false
+  start_epoch: 1
+  ema_beta: 0.95
+  tau: 1.0
+  group_velocity: true        # u/v/w 视为一组
+  w_min: 0.5
+  w_max: 2.0
+
+mo:                           # [ENH：多目标梯度手术（PCGrad / CAGrad）]
+  # sum  : 直接加和（不做梯度手术）——作为默认/对照
+  # pcgrad : PCGrad（投影冲突梯度）
+  # cagrad : CAGrad（取最小冲突解）
+  # solver: "sum"
+
+  # PCGrad 相关设置
+  pcgrad_proj: "conflict"     # "conflict" = 仅在梯度内积<0时投影；"all" = 对所有任务两两投影
+  pcgrad_retain_low: true     # true = 冲突时保留小模长梯度方向
+
+  # CAGrad 相关设置
+  # cagrad_c: 0.4               # 控制 trade-off（0~1，一般 0.4~0.6）
+  # cagrad_normalize: true      # 是否先对各任务梯度做归一化
+  # cagrad_rescale: "max"       # "max" / "l2"：合成梯度长度与基线对齐方式
+
+# --------------------------------------------------------------------------------------------
+# 提前停止 / 保存策略 / Backbone
+# --------------------------------------------------------------------------------------------
+
+early:
+  patience: 15
+  delta: 1.0e-4
+
+save:
+  ok_margin: 0.40
+  metric: "val_loss"
+
+models:
+  backbone:
+    name: "pointnet2pp_ssg"
+    args:
+      out_channels: 4
+      p_drop: 0.3
+      npoint1: 2048
+      npoint2: 512
+      npoint3: 128
+      k1: 16
+      k2: 16
+      k3: 16
+      c1: 128
+      c2: 256
+      c3: 512
+      groups_gn: 32
+      use_pe: false
+      use_msg: false
+      in_ch0: 0
+      p_head_ch: [128, 64]
+      uvw_head_ch: [128, 64]
+      use_graph_refine: true
+      refine_k: 16
+      refine_layers: 2
+      refine_hidden: 128
+      refine_residual: true

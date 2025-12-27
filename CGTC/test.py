@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-test_tpac.py —— 评测 / 可视化（支持 YAML 配置，尽可能与 train_tpac 对齐）
+test.py —— 评测 / 可视化（支持 YAML 配置，尽可能与 train_tpac 对齐）
 
 更新要点（本版本）：
 1) ✅ 新增全量/抽样物理评估开关

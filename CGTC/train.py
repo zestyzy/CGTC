@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-train_tpac.py —— 训练入口（支持 YAML 配置，和 test_tpac 对齐）
+train.py —— 训练入口（支持 YAML 配置，和 test_tpac 对齐）
 
 功能要点
 - 读取 YAML（默认 Rotate/configs/default.yaml），并允许命令行覆盖 device / batch / workers / 采样点数等。
@@ -43,7 +43,7 @@ try:  # pragma: no cover - prefer absolute import when available
     from Rotate.models.backbone import build_backbone
 except ModuleNotFoundError:  # pragma: no cover - fallback for script execution
     from models.backbone import build_backbone
-from training.trainer_new import Trainer
+from training.trainer import Trainer
 from training.utils import ensure_dir, plot_training_curves
 from data.dataset import pointdata, norm_data, build_out_csv_from_dir
 

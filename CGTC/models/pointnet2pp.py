@@ -1,4 +1,3 @@
-# tpac_pointnet2pp.py
 # PointNet++ (+ 可选动态图卷积细化) with dual-head [p] & [u,v,w]
 import torch
 import torch.nn as nn

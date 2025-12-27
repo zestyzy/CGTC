@@ -1,4 +1,3 @@
-# tpac_pointtransformer.py
 # PointTransformer with dual-head [p] & [u,v,w] (+ 可选动态图卷积细化)
 
 import torch

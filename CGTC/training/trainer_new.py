@@ -31,11 +31,11 @@ try:  # prefer Rotate.* absolute imports
         current_alpha,
         teacher_consis_weight,
     )
-    from Rotate.training.utils import ensure_dir, save_state, symlink_or_copy
-    from Rotate.eval.metrics import compute_region_metrics
+    from CGTC.training.utils import ensure_dir, save_state, symlink_or_copy
+    from CGTC.eval.metrics import compute_region_metrics
 except Exception:
     try:  # TPAC.* layout
-        from TPAC.models.tpac_pinn import SteadyIncompressiblePINN
+        from CGTC.models.tpac_pinn import SteadyIncompressiblePINN
         from TPAC.training.losses import (
             make_scaler,
             make_point_weights,

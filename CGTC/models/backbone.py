@@ -5,18 +5,18 @@ from typing import Optional, Dict
 
 # PointNet++ 回归器
 try:  # pragma: no cover - prefer absolute import when package is installed
-    from Rotate.models.tpac_pointnet2pp import PointNet2Regressor as _PN2Reg
+    from Rotate.models.pointnet2pp import PointNet2Regressor as _PN2Reg
 except ModuleNotFoundError:  # pragma: no cover - fallback for script execution
-    from models.tpac_pointnet2pp import PointNet2Regressor as _PN2Reg
+    from models.pointnet2pp import PointNet2Regressor as _PN2Reg
 
 # PointTransformer 回归器
 try:  # pragma: no cover
-    from Rotate.models.tpac_pointTransformer import (
+    from Rotate.models.pointTransformer import (
         PointTransformerRegressor as _PTReg,
     )
 except ModuleNotFoundError:  # pragma: no cover
     try:
-        from models.tpac_pointTransformer import (
+        from models.pointTransformer import (
             PointTransformerRegressor as _PTReg,
         )
     except ModuleNotFoundError:

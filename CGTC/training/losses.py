@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# TPAC/training/losses.py
 from __future__ import annotations
 from typing import Tuple, Optional
 import torch

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# TPAC / Rotate - trainer.py
+# trainer.py
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,41 +17,39 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-# ----------------- imports (try multiple layouts) -----------------
-try:  # prefer Rotate.* absolute imports
-    from Rotate.models.tpac_pinn import SteadyIncompressiblePINN
-    from Rotate.training.losses import (
+try:  
+    from CGTC.models.pinn import SteadyIncompressiblePINN
+    from CGTC.training.losses import (
         make_scaler,
         make_point_weights,
         compute_weighted_losses,
         losses_per_channel,
     )
-    from Rotate.training.schedules import (
+    from CGTC.training.schedules import (
         base_lambda_cont,
         current_alpha,
         teacher_consis_weight,
     )
-    from Rotate.training.utils import ensure_dir, save_state, symlink_or_copy
-    from Rotate.eval.metrics import compute_region_metrics
+    from CGTC.training.utils import ensure_dir, save_state, symlink_or_copy
+    from CGTC.eval.metrics import compute_region_metrics
 except Exception:
-    try:  # TPAC.* layout
-        from TPAC.models.tpac_pinn import SteadyIncompressiblePINN
-        from TPAC.training.losses import (
+    try:  
+        from CGTC.models.tpac_pinn import SteadyIncompressiblePINN
+        from CGTC.training.losses import (
             make_scaler,
             make_point_weights,
             compute_weighted_losses,
             losses_per_channel,
         )
-        from TPAC.training.schedules import (
+        from CGTC.training.schedules import (
             base_lambda_cont,
             current_alpha,
             teacher_consis_weight,
         )
-        from TPAC.training.utils import ensure_dir, save_state, symlink_or_copy
-        from TPAC.eval.metrics import compute_region_metrics
+        from CGTC.training.utils import ensure_dir, save_state, symlink_or_copy
+        from CGTC.eval.metrics import compute_region_metrics
     except Exception:
-        # very last fallback: local relative layout
-        from models.tpac_pinn import SteadyIncompressiblePINN
+        from models.pinn import SteadyIncompressiblePINN
         from training.losses import (
             make_scaler,
             make_point_weights,

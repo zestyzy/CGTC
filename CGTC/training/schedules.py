@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# TPAC/training/schedules.py
 from __future__ import annotations
 import math
 

@@ -1,4 +1,3 @@
-# tpac_pinn.py
 # Steady incompressible PINN for point clouds (robust, with raw metrics, with in-PINN normalization handling)
 from __future__ import annotations
 from typing import Optional, Dict, Tuple

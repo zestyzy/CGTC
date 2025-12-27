@@ -2,25 +2,8 @@
 import torch
 import torch.nn as nn
 from typing import Optional, Dict
-
-# PointNet++ 回归器
-try:  # pragma: no cover - prefer absolute import when package is installed
-    from Rotate.models.pointnet2pp import PointNet2Regressor as _PN2Reg
-except ModuleNotFoundError:  # pragma: no cover - fallback for script execution
-    from models.pointnet2pp import PointNet2Regressor as _PN2Reg
-
-# PointTransformer 回归器
-try:  # pragma: no cover
-    from Rotate.models.pointTransformer import (
-        PointTransformerRegressor as _PTReg,
-    )
-except ModuleNotFoundError:  # pragma: no cover
-    try:
-        from models.pointTransformer import (
-            PointTransformerRegressor as _PTReg,
-        )
-    except ModuleNotFoundError:
-        _PTReg = None
+from models.pointnet2pp import PointNet2Regressor as _PN2Reg
+from models.pointTransformer import PointTransformerRegressor as _PTReg,
 
 __all__ = ["PointNet2Adapter", "PointTransformerAdapter", "build_backbone"]
 

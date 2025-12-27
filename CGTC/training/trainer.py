@@ -17,56 +17,21 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-try:  
-    from CGTC.models.pinn import SteadyIncompressiblePINN
-    from CGTC.training.losses import (
+
+from CGTC.models.pinn import SteadyIncompressiblePINN
+from CGTC.training.losses import (
         make_scaler,
         make_point_weights,
         compute_weighted_losses,
         losses_per_channel,
     )
-    from CGTC.training.schedules import (
+from CGTC.training.schedules import (
         base_lambda_cont,
         current_alpha,
         teacher_consis_weight,
     )
-    from CGTC.training.utils import ensure_dir, save_state, symlink_or_copy
-    from CGTC.eval.metrics import compute_region_metrics
-except Exception:
-    try:  
-        from CGTC.models.tpac_pinn import SteadyIncompressiblePINN
-        from CGTC.training.losses import (
-            make_scaler,
-            make_point_weights,
-            compute_weighted_losses,
-            losses_per_channel,
-        )
-        from CGTC.training.schedules import (
-            base_lambda_cont,
-            current_alpha,
-            teacher_consis_weight,
-        )
-        from CGTC.training.utils import ensure_dir, save_state, symlink_or_copy
-        from CGTC.eval.metrics import compute_region_metrics
-    except Exception:
-        from models.pinn import SteadyIncompressiblePINN
-        from training.losses import (
-            make_scaler,
-            make_point_weights,
-            compute_weighted_losses,
-            losses_per_channel,
-        )
-        from training.schedules import (
-            base_lambda_cont,
-            current_alpha,
-            teacher_consis_weight,
-        )
-        from training.utils import ensure_dir, save_state, symlink_or_copy
-        try:
-            from eval.metrics import compute_region_metrics
-        except Exception:
-            from training.metrics import compute_region_metrics
-
+from CGTC.training.utils import ensure_dir, save_state, symlink_or_copy
+from CGTC.eval.metrics import compute_region_metrics
 
 # ----------------- small helpers -----------------
 def stack_preds(preds_dict: dict) -> torch.Tensor:
@@ -922,7 +887,7 @@ class Trainer:
 
         # guard config
         guard_cfg = getattr(cfg, "guard", SimpleNamespace())
-        self.gradcos_interval = max(1, int(getattr(guard_cfg, "gradcos_interval", 10)))
+        self.gradcos_interval = max(1, int(getattr(guard_cfg, "gradcos_interval", 1)))
         self.gradcos_eps = float(getattr(guard_cfg, "eps", 1e-8))
         self.disable_guard = bool(getattr(guard_cfg, "disable", False))
         self.reverse_hierarchy = bool(getattr(guard_cfg, "reverse_hierarchy", False))

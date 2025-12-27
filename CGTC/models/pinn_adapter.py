@@ -9,11 +9,7 @@ from typing import Dict, Any, Optional
 
 import torch
 import torch.nn as nn
-
-try:  # pragma: no cover
-    from Rotate.models.tpac_pinn import SteadyIncompressiblePINN
-except ModuleNotFoundError:  # pragma: no cover
-    from models.tpac_pinn import SteadyIncompressiblePINN
+from models.tpac_pinn import SteadyIncompressiblePINN
 
 __all__ = ["TPACPINNAdapter", "build_pinn"]
 

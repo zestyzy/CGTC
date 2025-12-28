@@ -11,27 +11,62 @@ import json
 import math
 import time
 from collections import deque
+import statistics
 
 import pandas as pd
 import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-
-from models.pinn import SteadyIncompressiblePINN
-from training.losses import (
+try:  
+    from CGTC.models.pinn import SteadyIncompressiblePINN
+    from CGTC.training.losses import (
         make_scaler,
         make_point_weights,
         compute_weighted_losses,
         losses_per_channel,
     )
-from training.schedules import (
+    from CGTC.training.schedules import (
         base_lambda_cont,
         current_alpha,
         teacher_consis_weight,
     )
-from training.utils import ensure_dir, save_state, symlink_or_copy
-from training.metrics import compute_region_metrics
+    from CGTC.training.utils import ensure_dir, save_state, symlink_or_copy
+    from CGTC.eval.metrics import compute_region_metrics
+except Exception:
+    try:  
+        from CGTC.models.tpac_pinn import SteadyIncompressiblePINN
+        from CGTC.training.losses import (
+            make_scaler,
+            make_point_weights,
+            compute_weighted_losses,
+            losses_per_channel,
+        )
+        from CGTC.training.schedules import (
+            base_lambda_cont,
+            current_alpha,
+            teacher_consis_weight,
+        )
+        from CGTC.training.utils import ensure_dir, save_state, symlink_or_copy
+        from CGTC.eval.metrics import compute_region_metrics
+    except Exception:
+        from models.pinn import SteadyIncompressiblePINN
+        from training.losses import (
+            make_scaler,
+            make_point_weights,
+            compute_weighted_losses,
+            losses_per_channel,
+        )
+        from training.schedules import (
+            base_lambda_cont,
+            current_alpha,
+            teacher_consis_weight,
+        )
+        from training.utils import ensure_dir, save_state, symlink_or_copy
+        try:
+            from eval.metrics import compute_region_metrics
+        except Exception:
+            from training.metrics import compute_region_metrics
 
 
 # ----------------- small helpers -----------------
@@ -485,6 +520,8 @@ class Trainer:
             "g_ratio": float(phys_info.get("g_ratio", float("nan"))),
             "cos_stage": str(phys_info.get("cos_stage", "")),
             "cos_scale": float(phys_info.get("cos_scale", float("nan"))),
+            "cos_stage_spat": str(spatial_info.get("cos_stage", "")),
+            "cos_scale_spat": float(spatial_info.get("cos_scale", float("nan"))),
         }
         self.step_records.append(record)
 
@@ -560,6 +597,9 @@ class Trainer:
             lines.append(f"mo_solver={json.dumps(self.mo_solver)}")
         if getattr(self, "pinn_guard_metric", None) is not None:
             lines.append(f"pinn_guard_metric={json.dumps(self.pinn_guard_metric)}")
+        if getattr(self, "auto_pinn_guard_ratio", False):
+            lines.append(f"pinn_guard_ratio_auto={json.dumps(self.pinn_guard_ratio)}")
+        lines.append(f"guard_gamma_pinn={json.dumps(self.guard_gamma_pinn)}")
         return lines
 
     def _finalise_events(self) -> None:
@@ -888,7 +928,7 @@ class Trainer:
 
         # guard config
         guard_cfg = getattr(cfg, "guard", SimpleNamespace())
-        self.gradcos_interval = max(1, int(getattr(guard_cfg, "gradcos_interval", 1)))
+        self.gradcos_interval = max(1, int(getattr(guard_cfg, "gradcos_interval", 10)))
         self.gradcos_eps = float(getattr(guard_cfg, "eps", 1e-8))
         self.disable_guard = bool(getattr(guard_cfg, "disable", False))
         self.reverse_hierarchy = bool(getattr(guard_cfg, "reverse_hierarchy", False))
@@ -955,8 +995,12 @@ class Trainer:
         self.spatial_cooldown = 0
 
         # PINN guard
-        self.guard_gamma_pinn = float(getattr(cfg.pinn, "guard_gamma", 0.7))
+        guard_gamma_raw = getattr(cfg.pinn, "guard_gamma", 0.7)
         self.cooling_window_pinn = int(getattr(cfg.pinn, "cooling_window", 3))
+        if isinstance(guard_gamma_raw, str) and guard_gamma_raw.lower() == "auto":
+            self.guard_gamma_pinn = float(2 ** (-1 / max(1, self.cooling_window_pinn)))
+        else:
+            self.guard_gamma_pinn = float(guard_gamma_raw)
         self.cooling_state = {
             "pinn": {"active": False, "remaining": 0, "reason": None},
             "spatial": {"active": False, "remaining": 0, "reason": None},
@@ -989,7 +1033,14 @@ class Trainer:
             smooth_epochs_cfg = max(5, max(1, ramp_ref) // 4)
         self.pinn_blend = 0.0
         self.pinn_blend_step = 1.0 / max(1, int(smooth_epochs_cfg))
-        self.pinn_guard_ratio = float(getattr(cfg.pinn, "max_loss_ratio", 0.0) or 0.0)
+        pinn_guard_raw = getattr(cfg.pinn, "max_loss_ratio", 0.0)
+        self.auto_pinn_guard_ratio = isinstance(pinn_guard_raw, str) and pinn_guard_raw.lower() == "auto"
+        if pinn_guard_raw is None:
+            self.auto_pinn_guard_ratio = True
+        if self.auto_pinn_guard_ratio:
+            self.pinn_guard_ratio = 1.0
+        else:
+            self.pinn_guard_ratio = float(pinn_guard_raw or 0.0)
         self.pinn_guard_vs_spatial = float(getattr(cfg.pinn, "max_ratio_vs_spatial", 0.0) or 0.0)
         self.guard_blend_reset = float(getattr(cfg.pinn, "guard_blend_reset", 0.65))
         self.guard_backoff = float(getattr(cfg.pinn, "guard_backoff", 0.4))
@@ -998,6 +1049,9 @@ class Trainer:
         self.guard_blend_decay = float(getattr(cfg.pinn, "guard_blend_decay", 0.5))
         self.guard_cooldown_default = int(getattr(cfg.pinn, "guard_cooldown", 3))
         self.guard_cooldown = 0
+        self.auto_guard_ready = not self.auto_pinn_guard_ratio
+        self.pinn_freeze_active = False
+        self.pinn_guard_ratio_history: list[float] = []
 
         self.teacher_guard_ratio = float(getattr(cfg.teacher, "max_ratio", 0.0) or 0.0)
         self.spatial_guard_ratio = float(getattr(self.spatial_cfg, "max_ratio", 0.0) or 0.0)
@@ -1011,6 +1065,8 @@ class Trainer:
             self.cooling_window_pinn = 0
             self.spatial_gamma = 1.0
             self.spatial_cooling_window = 0
+            self.auto_pinn_guard_ratio = False
+            self.auto_guard_ready = True
 
     # ----------------- ratio guard (loss-ratio; legacy) -----------------
     def _apply_ratio_guard(
@@ -1128,6 +1184,7 @@ class Trainer:
         guard_scales: list[float] = []
         teacher_guard_scales: list[float] = []
         spatial_guard_scales: list[float] = []
+        guard_ratio_samples: list[float] = []
 
         for batch in pbar:
             batch_idx += 1
@@ -1250,14 +1307,19 @@ class Trainer:
                         spatial_raw_term_for_grad = spatial_raw_term
                         spatial_info["raw"] = float(spatial_raw_term.detach().mean().item())
                         if not self.reverse_hierarchy:
-                            spatial_term, spatial_guard = self._apply_ratio_guard(
-                                spatial_raw_term, mse, self.spatial_guard_ratio
-                            )
-                            spatial_info.update(spatial_guard)
-                            spatial_anchor_val = float(spatial_guard["cap"])
-                            if spatial_guard.get("triggered"):
-                                cooling_flags.append(self._trigger_cooling("spatial", "overbound"))
-                            spatial_guard_scales.append(spatial_guard["scale"])
+                            if self.cos_control:
+                                spatial_term = spatial_raw_term
+                                spatial_info["cap"] = float(spatial_raw_term.detach().mean().item())
+                                spatial_guard_scales.append(1.0)
+                            else:
+                                spatial_term, spatial_guard = self._apply_ratio_guard(
+                                    spatial_raw_term, mse, self.spatial_guard_ratio
+                                )
+                                spatial_info.update(spatial_guard)
+                                spatial_anchor_val = float(spatial_guard["cap"])
+                                if spatial_guard.get("triggered"):
+                                    cooling_flags.append(self._trigger_cooling("spatial", "overbound"))
+                                spatial_guard_scales.append(spatial_guard["scale"])
                             spatial_term_eff = spatial_term * self.spatial_blend
                             total = total + spatial_term_eff
                         else:
@@ -1363,26 +1425,51 @@ class Trainer:
                         cap_val = phys_info.get("cap")
                         if cap_val is not None and self.pinn_guard_vs_spatial > 0.0:
                             extra_caps2.append(float(cap_val) * self.pinn_guard_vs_spatial)
-                        spatial_term, spatial_guard = self._apply_ratio_guard(
-                            spatial_raw_term_for_grad,
-                            None,
-                            0.0,
-                            extra_caps=extra_caps2,
-                        )
-                        spatial_info.update(spatial_guard)
-                        if spatial_guard.get("triggered"):
-                            cooling_flags.append(self._trigger_cooling("spatial", "overbound"))
-                        spatial_guard_scales.append(spatial_guard["scale"])
+                        if self.cos_control:
+                            spatial_term = spatial_raw_term_for_grad
+                            spatial_guard_scales.append(1.0)
+                        else:
+                            spatial_term, spatial_guard = self._apply_ratio_guard(
+                                spatial_raw_term_for_grad,
+                                None,
+                                0.0,
+                                extra_caps=extra_caps2,
+                            )
+                            spatial_info.update(spatial_guard)
+                            if spatial_guard.get("triggered"):
+                                cooling_flags.append(self._trigger_cooling("spatial", "overbound"))
+                            spatial_guard_scales.append(spatial_guard["scale"])
                         spatial_term_eff = spatial_term * self.spatial_blend
                         total = total + spatial_term_eff
                     elif spatial_pending:
                         spatial_guard_scales.append(1.0)
+
+            if (
+                phys_raw_term_for_grad is not None
+                and mse is not None
+                and (self.global_step % self.gradcos_interval == 0)
+            ):
+                need_ratio = (self.auto_pinn_guard_ratio and not self.auto_guard_ready) or self.pinn_freeze_active
+                if need_ratio:
+                    params = self.grad_params if self.grad_params else [
+                        p for p in self.model.parameters() if p.requires_grad
+                    ]
+                    g_sup = self._grad_norm(mse, params)
+                    g_phys = self._grad_norm(phys_raw_term_for_grad, params)
+                    if math.isfinite(g_sup) and math.isfinite(g_phys):
+                        ratio = float(g_phys / (g_sup + self.gradcos_eps))
+                        if self.auto_pinn_guard_ratio and not self.auto_guard_ready:
+                            guard_ratio_samples.append(ratio)
+                        if self.pinn_freeze_active and ratio <= self.pinn_guard_ratio:
+                            self.pinn_freeze_active = False
 
             gradcos_spat = float("nan")
             gradcos_phys = float("nan")
             neg_cos = False
             cos_stage = "off"
             cos_scale = 1.0
+            spatial_cos_stage = "off"
+            spatial_cos_scale = 1.0
             cos_solver_override: Optional[str] = None
             if self.grad_params and (self.global_step % self.gradcos_interval == 0):
                 gradcos_spat = self._compute_grad_cos(mse, spatial_raw_term_for_grad)
@@ -1395,13 +1482,36 @@ class Trainer:
                         cooling_flags.append(self._trigger_cooling("pinn", "neg-cos"))
                     neg_cos = True
 
+            if self.cos_control and math.isfinite(gradcos_spat) and spatial_term_eff is not None:
+                spatial_cos_stage, spatial_cos_scale, spatial_solver_override = self._cosine_control(
+                    gradcos_spat
+                )
+                spatial_info["cos_stage"] = spatial_cos_stage
+                spatial_info["cos_scale"] = float(spatial_cos_scale)
+                if spatial_cos_stage == "freeze":
+                    total = total - spatial_term_eff
+                    spatial_term_eff = None
+                    cooling_flags.append(self._trigger_cooling("spatial", "cos-freeze"))
+                elif spatial_cos_stage in {"scale", "surgery"}:
+                    if spatial_cos_scale < 1.0:
+                        total = total - spatial_term_eff
+                        spatial_term_eff = spatial_term_eff * float(spatial_cos_scale)
+                        total = total + spatial_term_eff
+                    if spatial_cos_stage == "surgery":
+                        cooling_flags.append(self._trigger_cooling("spatial", "cos-surgery"))
+                    else:
+                        cooling_flags.append(self._trigger_cooling("spatial", "cos-scale"))
+                if spatial_solver_override is not None:
+                    cos_solver_override = spatial_solver_override
+
             if self.cos_control and math.isfinite(gradcos_phys) and phys_term_eff is not None:
-                cos_stage, cos_scale, cos_solver_override = self._cosine_control(gradcos_phys)
+                cos_stage, cos_scale, phys_solver_override = self._cosine_control(gradcos_phys)
                 phys_info["cos_stage"] = cos_stage
                 phys_info["cos_scale"] = float(cos_scale)
                 if cos_stage == "freeze":
                     total = total - phys_term_eff
                     phys_term_eff = None
+                    self.pinn_freeze_active = True
                     cooling_flags.append(self._trigger_cooling("pinn", "cos-freeze"))
                 elif cos_stage in {"scale", "surgery"}:
                     if cos_scale < 1.0:
@@ -1412,6 +1522,15 @@ class Trainer:
                         cooling_flags.append(self._trigger_cooling("pinn", "cos-surgery"))
                     else:
                         cooling_flags.append(self._trigger_cooling("pinn", "cos-scale"))
+                if phys_solver_override is not None:
+                    cos_solver_override = phys_solver_override
+
+            if self.pinn_freeze_active and phys_term_eff is not None:
+                total = total - phys_term_eff
+                phys_term_eff = None
+                phys_info["cos_stage"] = "freeze"
+                phys_info["cos_scale"] = 0.0
+                cooling_flags.append(self._trigger_cooling("pinn", "freeze-hold"))
 
             # multi-objectives for solver: sup + spatial + physics
             mo_objectives: list[torch.Tensor] = []
@@ -1436,7 +1555,7 @@ class Trainer:
                 or bool(neg_cos)
             )
             use_mo = (
-                (cooling_active or cos_stage == "surgery")
+                (cooling_active or cos_stage == "surgery" or spatial_cos_stage == "surgery")
                 and (self.mo_solver is not None)
                 and (self.mo_solver != "sum")
                 and (len(mo_objectives) >= 2)
@@ -1490,6 +1609,21 @@ class Trainer:
         spatial_guard_mean = (
             sum(spatial_guard_scales) / len(spatial_guard_scales) if spatial_guard_scales else 1.0
         )
+
+        if self.auto_pinn_guard_ratio and (not self.auto_guard_ready) and guard_ratio_samples:
+            ratio = float(statistics.median(guard_ratio_samples))
+            if math.isfinite(ratio) and ratio > 0.0:
+                self.pinn_guard_ratio = ratio
+                self.auto_guard_ready = True
+                self.pinn_guard_ratio_history.append(ratio)
+                self.stage_events.append(
+                    {
+                        "event": "auto_guard_ratio",
+                        "value": ratio,
+                        "epoch": epoch_idx,
+                        "global_step": self.global_step,
+                    }
+                )
 
         return (
             loss_sum / max(batch_idx, 1),

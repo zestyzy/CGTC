@@ -54,8 +54,8 @@ pinn:
   guard_metric: "grad"
 
   # For grad-guard: tau = ||g_phys||/(||g_sup||+eps) upper bound
-  # Start with 5.0; tune in [3, 8] depending on how aggressive you want the controller.
-  max_loss_ratio: 5.0
+  # Use "auto" to estimate tau from early-step gradient ratios (median over first joint epoch).
+  max_loss_ratio: "auto"
 
   # NOTE: In your current grad-guard trainer, "vs_spatial" extra-cap is NOT used yet.
   # Set to 0.0 to avoid misleading semantics. (You can re-enable after upgrading trainer.)
@@ -67,7 +67,8 @@ pinn:
   guard_adapt_min: 0.35
   guard_blend_decay: 0.5
   guard_cooldown: 3
-  guard_gamma: 0.7
+  # "auto" maps cooling_window -> half-life: gamma = 2^(-1 / cooling_window)
+  guard_gamma: "auto"
   cooling_window: 4
 
   # --- Enhance: lambda_cont multiplier adaptation ---

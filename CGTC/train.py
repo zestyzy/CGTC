@@ -1,16 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-用法示例
-CUDA_VISIBLE_DEVICES=0 python train_tpac.py \
-  --cfg   CGTC/configs/default.yaml \
-  --root  /data/.../CGTC \
-  --case  C1 \
-  --tag   tpac_test \
+python CGTC/train.py \
+  --cfg CGTC/configs/default.yaml \
+  --root /path/to/project \
+  --case C1 \
+  --tag demo \
   --device cuda:0 \
-  --pts 4096 --batch 2 --workers 4
-
-训练结束后，推荐权重位于：
-  /.../results/temp_results/{case}/{tag}/weight/final_reco.pth
+  --pts 4096 \
+  --batch 8 \
+  --workers 4
 """
 
 from __future__ import annotations

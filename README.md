@@ -56,8 +56,8 @@ python CGTC/train.py \
   --case C1 \
   --tag demo \
   --device cuda:0 \
-  --pts 16384 \
-  --batch 2 \
+  --pts 4096 \
+  --batch 8 \
   --workers 4
 ```
 
@@ -93,7 +93,7 @@ python CGTC/test.py \
   --case C1 \
   --tag demo \
   --device cuda:0 \
-  --pts 16384 \
+  --pts 4096 \
   --vis_indices 0,5,12 \
   --phys_max_items 6
 ```
@@ -112,7 +112,7 @@ python CGTC/eval/eval_physics.py \
   --root /path/to/project \
   --case C1 \
   --split test \
-  --pts 16384 \
+  --pts 4096 \
   --ckpt-dir results/temp_results/C1/demo/weight \
   --out results/temp_results/C1/demo/physics_eval.csv
 ```

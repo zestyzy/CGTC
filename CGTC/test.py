@@ -1,6 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-test.py 
+bash
+python CGTC/test.py \
+  --root /path/to/project \
+  --case C1 \
+  --tag demo \
+  --device cuda:0 \
+  --pts 4096 \
+  --vis_indices 0,5,12 \
+  --phys_max_items 6
 """
 
 from __future__ import annotations

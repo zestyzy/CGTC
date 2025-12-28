@@ -1,5 +1,16 @@
 # -*- coding: utf-8 -*-
-# trainer.py
+# trainer.py 
+"""
+python CGTC/train.py \
+  --cfg CGTC/configs/default.yaml \
+  --root /path/to/project \
+  --case C1 \
+  --tag demo \
+  --device cuda:0 \
+  --pts 4096 \
+  --batch 8 \
+  --workers 4
+"""
 from __future__ import annotations
 
 from pathlib import Path

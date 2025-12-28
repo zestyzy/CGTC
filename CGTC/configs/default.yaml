@@ -1,6 +1,3 @@
-# =====================  CGTC Default (Grad-ratio Guard, Core+Enhance knobs kept) =====================
-# Compatible with your current trainer.py (supports pinn.guard_metric = "grad" / "loss").
-
 train:
   epochs: 250
   lr: 1.0e-4

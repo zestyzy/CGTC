@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-TPAC/eval/eval_physics.py
+CGTC/eval/eval_physics.py
 
 - 支持两类模型前向：
   1) 经典模型:  forward((B,3,N)) -> (B,4,N)  (通道顺序 [p,u,v,w])

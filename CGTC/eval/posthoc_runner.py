@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# TPAC/eval/posthoc_runner.py
+# CGTC/eval/posthoc_runner.py
 from __future__ import annotations
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any

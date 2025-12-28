@@ -1,67 +1,149 @@
-# Rotate: Supervision–Geometry–Physics Co-Learning
+# CGTC：点云流场监督 + PINN 约束训练
 
-Rotate implements a two-stage TPAC training pipeline that warms a pure supervised model before balancing it with spatial and physics-aware regularisers. The repository now exposes hierarchical ratio guards, feedback-controlled cooling, robustness perturbations, comprehensive diagnostics, and automated ablations so that the workflow can support IJCAI-style method writing.
+本仓库实现了一个面向点云流场重建的训练/评估流程：以监督损失为主线，叠加连续性与动量残差（PINN）约束，并提供教师 EMA、层级守卫（guard）、冷却（cooling）与多目标梯度求解器等稳定训练机制。
 
-## Quick start
+## 功能概览
 
-```bash
-# Standard training
-python train_tpac.py --cfg configs/default.yaml \
-  --root /path/to/project --case C1 --tag demo --device cuda:0 \
-  --pts 16384 --batch 2 --workers 4
+- **监督学习主干**：以 PointNet++ / PointTransformer 回归点云上的 `p,u,v,w`。
+- **物理约束（PINN）**：基于 kNN + 最小二乘梯度估计的连续性/动量残差。
+- **训练稳定机制**：
+  - 梯度/损失比率 guard（可切换，支持自动阈值）。
+  - 冷却窗口（cooling）与 guard-backoff。
+  - 教师 EMA + 一致性损失。
+  - 多目标梯度求解（sum / PCGrad / CAGrad）。
+- **鲁棒与 OOD 扰动**：训练/验证/测试可独立配置采样、噪声、遮挡、缩放、旋转。
+- **评估与可视化**：
+  - `test.py` 生成预测/误差可视化与物理统计。
+  - `eval/eval_physics.py` 批量 physics 统计与可选直方图。
+  - `eval/posthoc_runner.py` 对指定权重做后验监督 + 物理评估。
 
-# Robust/OOD training example
-python train_tpac.py --cfg configs/default.yaml \
-  --root /path/to/project --case C1 --tag robust_demo \
-  --subsample_ratio 0.5 --coord_noise_sigma 0.002 \
-  --occlusion_ratio 0.2 --ood_rotation --ood_rot_deg 60
+## 目录结构
 
-# Ablations + diagnostics + physics eval
-bash wo.sh --case C1 --tag ablate_demo --device cuda:0 \
-  --no-guard --reverse-hierarchy --ratio-sweep \
-  --no-rollback --no-freeze-teacher
+- `CGTC/train.py`：训练入口，构建数据、模型、Trainer，并保存权重与曲线。
+- `CGTC/test.py`：测试与可视化入口，支持固定样本可视化与物理评估。
+- `CGTC/eval/eval_physics.py`：批量物理评估（散度 + 动量残差）并输出 CSV/直方图。
+- `CGTC/eval/posthoc_runner.py`：后验评估封装（加载权重 -> 监督评估 -> 物理评估）。
+- `CGTC/training/trainer.py`：完整训练循环，包含 guard/cooling/EMA/多目标求解。
+- `CGTC/models/`：PointNet2/PointTransformer 主干与 PINN 计算。
+- `CGTC/configs/default.yaml`：默认训练配置。
 
-# Batch physics evaluation
-python eval/eval_physics.py --root /path/to/project --case C1 \
-  --cfg configs/default.yaml --split test --pts 16384 \
-  --ckpt-dir results/temp_results/C1/demo/weight \
-  --out results/temp_results/C1/demo/physics_eval.csv
+## 数据与依赖
 
-# Visual diagnostics (curves.pdf/curves.png + legacy PNGs)
-python draw_picture.py --metrics results/temp_results/C1/demo/train_val_metrics.csv \
-  --out-dir results/temp_results/C1/demo/diagnostics
+训练/评估依赖 `data.dataset` 模块（`pointdata`, `norm_data`, `build_out_csv_from_dir`）。该模块不在本仓库中，需要在 `PYTHONPATH` 中提供；数据目录结构约定如下：
+
+```
+<ROOT>/
+  data/
+    dataset/
+      <CASE>/
+        train/   # 训练点云样本
+        test/    # 验证/测试点云样本
+  results/
+    temp_results/
+      <CASE>/<TAG>/
+        weight/  # 权重输出
+        curves/  # 曲线输出
 ```
 
-A ready-to-run orchestration script is provided at `scripts/demo.sh`; it chains training, diagnostics, physics evaluation, and ablations using the commands above (adjust `ROOT`, `CASE`, and device flags as needed).
+## 快速开始
 
-## Method perspective
+### 训练
 
-### Layered soft projection (hierarchical guards)
-Spatial and physics regularisers are now formalised as soft projections with explicit caps: spatial loss is limited by `rho_spat * L_sup`, while physics loss is bounded by `rho_phys * L_spat_cap`. Optional `max_ratio_vs_spatial` enforces that physics stays below a fraction of the capped spatial term. The trainer records `L_spat_raw/cap`, `L_phys_raw/cap`, guard scales, and trigger flags at step granularity, producing a schema-compliant `train_val_metrics.csv` that documents how each hierarchy level behaves.
+```bash
+python CGTC/train.py \
+  --cfg CGTC/configs/default.yaml \
+  --root /path/to/project \
+  --case C1 \
+  --tag demo \
+  --device cuda:0 \
+  --pts 16384 \
+  --batch 2 \
+  --workers 4
+```
 
-### Feedback-controlled cooling
-Whenever a guard saturates or gradient cosines become negative, the trainer triggers cooling: the corresponding blend is multiplied by `gamma`, a cooling window `W` is scheduled, and recovery is prevented until the window expires. Cooling events are exported via metadata for downstream visualisation. The defaults still realise the “Supervision > Spatial > Physics” ordering, while `guard.reverse_hierarchy`, `guard.disable`, `guard.no_rollback`, and `guard.no_freeze_teacher` expose counterfactual behaviours for ablations.
+训练输出位于：
 
-### Two-stage feasible initialisation
-Training retains the warm → rollback → warmup pipeline. The warm phase trains pure supervision with EMA teacher updates; once patience fires, the trainer optionally rolls back to the warm-best state, freezes the teacher reference, and enters warmup with blend ramps. Rolling back or freezing can be disabled via guard toggles to study their impact. Stage transitions and rollback markers are embedded into the metrics metadata, allowing `draw_picture.py` to render coloured bands and vertical markers.
+```
+results/temp_results/<CASE>/<TAG>/
+  weight/final_reco.pth
+  train_val_metrics.csv
+  curves/loss_curve.png
+```
 
-### Robustness and diagnostics
-Deterministic perturbations (subsampling, noise, occlusion, scaling, OOD rotations) can be applied per split through CLI flags or YAML defaults; all settings are captured inside the CSV metadata header. `draw_picture.py` consumes the enriched schema to render multi-panel diagnostics (loss hierarchy, guard scales, cooling windows, gradient cosines) and exports backwards-compatible PNGs. `eval/eval_physics.py` now supports batch checkpoint evaluation, outputs quantiles and KS distances, and can store histograms per checkpoint.
+### 训练时鲁棒/OOD 扰动
 
-### Reproducibility assets
-- `train_val_metrics.csv`: step/epoch logs with guard/cooling diagnostics, gradient cosines, and metadata headers.
-- `curves.pdf` / `curves.png`: staged visualisations with guard triggers and cooling spans.
-- `physics_eval.csv`: per-checkpoint divergence/momentum statistics with P50/P90/P95, means, stds, and KS metrics.
-- `runs/wo/<CASE>/<TAG>/wo_summary.csv`: consolidated ablation summaries (including toggles, supervision metrics, physics quantiles, guard hit rates, average cooling lengths, epoch timing, and seed).
-- `scripts/demo.sh`: end-to-end demo covering training, evaluation, plotting, and ablations.
+```bash
+python CGTC/train.py \
+  --cfg CGTC/configs/default.yaml \
+  --root /path/to/project \
+  --case C1 \
+  --tag robust_demo \
+  --subsample_ratio 0.5 \
+  --coord_noise_sigma 0.002 \
+  --occlusion_ratio 0.2 \
+  --ood_rotation \
+  --ood_rot_deg 60
+```
 
-## Repository layout
+### 测试与可视化
 
-- `train_tpac.py` – entry point with deterministic seeding, perturbation plumbing, and DataLoader construction.
-- `training/trainer.py` – two-stage trainer with hierarchical guards, gradient cosines, cooling feedback, and CSV writer.
-- `draw_picture.py` – stage-aware diagnostics with guard and cooling overlays plus gradient-cos plots.
-- `eval/eval_physics.py` – divergence/momentum evaluation with summary CSVs and optional histograms.
-- `wo.py` / `wo.sh` – configurable ablation runner that derives configs, launches training/diagnostics/eval, and aggregates results.
-- `scripts/demo.sh` – reference script showcasing the full workflow.
+```bash
+python CGTC/test.py \
+  --root /path/to/project \
+  --case C1 \
+  --tag demo \
+  --device cuda:0 \
+  --pts 16384 \
+  --vis_indices 0,5,12 \
+  --phys_max_items 6
+```
 
-Refer to the inline docstrings for implementation details and additional options.
+输出包括：
+
+- `pred_vs_real_puvw.png`：旧版单样本对比图（随机样本）。
+- `samples_vis/idx_XXXX/`：固定索引的可追溯可视化。
+- `div_hist.png` / `mom_hist.png` / `phys_stats.csv`：物理统计与直方图。
+
+### 批量物理评估
+
+```bash
+python CGTC/eval/eval_physics.py \
+  --cfg CGTC/configs/default.yaml \
+  --root /path/to/project \
+  --case C1 \
+  --split test \
+  --pts 16384 \
+  --ckpt-dir results/temp_results/C1/demo/weight \
+  --out results/temp_results/C1/demo/physics_eval.csv
+```
+
+### 后验评估（可选）
+
+```bash
+python - <<'PY'
+from pathlib import Path
+from CGTC.eval.posthoc_runner import run_posthoc
+from CGTC.models.backbone import build_backbone
+from types import SimpleNamespace as NS
+
+cfg = NS(models=NS(backbone=NS(name="pointnet2pp_ssg", args={})))
+model = build_backbone(cfg)
+
+run_posthoc(
+    model,
+    dl=None,  # 可传入 DataLoader 进行监督评估
+    weight_path=Path("results/temp_results/C1/demo/weight/final_reco.pth"),
+    device="cuda:0",
+    out_dir=Path("results/temp_results/C1/demo/posthoc"),
+)
+PY
+```
+
+## 训练流程要点
+
+- **阶段式训练**：先 warm（纯监督）再进入 PINN 约束阶段；支持回滚与 teacher 冻结。
+- **守卫与冷却**：基于 loss 或 grad 比率限制物理项；触发时进入 cooling 窗口并降低物理权重。
+- **多目标求解**：当监督 + 空间/物理项冲突时，可启用 PCGrad/CAGrad。
+- **鲁棒扰动**：训练/验证/测试均支持独立扰动配置，并记录到运行元数据。
+
+更多参数与默认值请查看 `CGTC/configs/default.yaml` 和各模块的注释说明。

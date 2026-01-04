@@ -19,14 +19,12 @@ guard:
   reverse_hierarchy: false
   no_rollback: false
   no_freeze_teacher: false
-  # Cosine-based trust-region control for PINN gradients
   cos_control: true
   cos_trust: 0.2
   cos_surgery: 0.0
   cos_freeze: -0.3
   cos_scale_min: 0.2
   cos_surgery_solver: "pcgrad"
-  # When cos_control is enabled, PINN cooling triggers follow cos stages.
 
 pinn:
   use: true
@@ -36,7 +34,6 @@ pinn:
   nu_eff: 0.003
   lambda_mom: 0.001
 
-  # --- schedule / stage semantics ---
   warmup: 100
   ramp: 40
   smooth_epochs: 12
@@ -45,30 +42,20 @@ pinn:
   schedule: "cosine"
   mode: "down"
 
-  # --- Guard metric ---
-  # "loss": old loss-ratio guard (L_phys / L_sup)
-  # "grad": new grad-ratio guard (||g_phys|| / (||g_sup||+eps))
   guard_metric: "grad"
 
-  # For grad-guard: tau = ||g_phys||/(||g_sup||+eps) upper bound
-  # Use "auto" to estimate tau from early-step gradient ratios (median over first joint epoch).
   max_loss_ratio: "auto"
 
-  # NOTE: In your current grad-guard trainer, "vs_spatial" extra-cap is NOT used yet.
-  # Set to 0.0 to avoid misleading semantics. (You can re-enable after upgrading trainer.)
   max_ratio_vs_spatial: 0.0
 
-  # --- CGTC control knobs ---
   guard_blend_reset: 0.65
   guard_backoff: 0.4
   guard_adapt_min: 0.35
   guard_blend_decay: 0.5
   guard_cooldown: 3
-  # "auto" maps cooling_window -> half-life: gamma = 2^(-1 / cooling_window)
   guard_gamma: "auto"
   cooling_window: 4
 
-  # --- Enhance: lambda_cont multiplier adaptation ---
   adapt: true
   lcont_min_mult: 0.5
   lcont_max_mult: 1.8
@@ -78,7 +65,6 @@ pinn:
   adapt_after: 121
   adapt_interval: 3
 
-  # --- Physics targets ---
   div_target: 0.1
   div_tol: 0.20
   auto_calib: true
@@ -88,15 +74,12 @@ pinn:
 teacher:
   use: true
   ema_beta: 0.995
-  # Optional: your trainer uses ema_beta_balance if present (fallback to ema_beta)
-  # ema_beta_balance: 0.995
   max_w: 0.20
   decay_eps: 200
-  # Present for completeness; trainer may not explicitly branch on it, but safe to keep.
+ 
   use_best_warm: true
   freeze_after_warm: true
 
-  # teacher ratio guard (still loss-based in your trainer)
   max_ratio: 0.35
 
   spatial:
@@ -108,12 +91,10 @@ teacher:
     cooling_window: 3
     recover_step: 0.1
 
-# Pressure gradient hook settings
 p_grad:
   release_epoch: 130
   scale: 0.05
 
-# Robustness knobs (usually applied in dataset pipeline / wo.py; trainer keeps metadata)
 robust:
   subsample_ratio: 1.0
   coord_noise_sigma: 0.0
@@ -140,7 +121,6 @@ mixed:
   schedule: "cosine"
   wall_sigma: 0.10
 
-# Adaptive channel weights (supervised channels)
 adapt:
   enable: true
   start_epoch: 1
@@ -150,11 +130,9 @@ adapt:
   w_min: 0.5
   w_max: 2.0
 
-# Multi-objective solver (only active during cooling in your trainer logic)
 mo:
   solver: "sum"        # "sum" / "pcgrad" / "cagrad"
   cagrad_alpha: 0.5
-  # The following are kept for CLI/YAML compatibility but may not be used in current trainer:
   pcgrad_proj: "conflict"
   pcgrad_retain_low: true
 
